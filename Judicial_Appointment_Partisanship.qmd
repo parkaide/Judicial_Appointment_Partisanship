@@ -1,0 +1,625 @@
+---
+title: "Jesse and Aiden Project"
+author: "Aiden Parker and Jesse Usher-Barret"
+description: "Polarization and State Supreme Courts"
+date: "04/12/2024"
+format:
+  html:
+    df-print: paged
+    css: "styles.css"
+    embed-resources: true
+    self-contained-math: true
+categories:
+  - Project 
+---
+
+# Final Project - Jesse and Aiden
+
+```{r}
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(forcats) 
+library(knitr)
+library(summarytools)
+library(car)
+library(sjPlot)
+library(sjlabelled)
+library(sjmisc)
+library(glmtoolbox)
+# library(rms)
+library(AICcmodavg)
+```
+
+## Loading and Subsetting to Needed Variables
+
+```{r}
+
+modeldata <- read_sav("Spring24Survey.sav")
+
+
+```
+
+```{r}
+
+subsetmodeldata <-  modeldata %>% select(Control, GOP_Treatment, Dem_Treatment, pid3lean, gender, age, education, Q5_1, Q5_2, Q12_2, Q12_3, hhi, hispanic, ethnicity)
+
+
+subsetmodeldata$hispanic <- as.numeric(subsetmodeldata$hispanic)
+subsetmodeldata$ethnicity <- as.numeric(subsetmodeldata$ethnicity)
+subsetmodeldata$Control <- as.factor(subsetmodeldata$Control)
+
+subsetmodeldata$Dem_Treatment <- as.factor(subsetmodeldata$Dem_Treatment)
+
+subsetmodeldata$GOP_Treatment <- as.factor(subsetmodeldata$GOP_Treatment)
+
+subsetmodeldata$age <- as.numeric(subsetmodeldata$age)
+
+subsetmodeldata$education <- as.factor(subsetmodeldata$education)
+
+subsetmodeldata$hhi <- as.factor(subsetmodeldata$hhi)
+subsetmodeldata$hhi <- factor(subsetmodeldata$hhi, levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25))
+
+subsetmodeldata$pid3lean <- as.factor(subsetmodeldata$pid3lean)
+
+subsetmodeldata <- subsetmodeldata %>% rename(DemTherm = Q5_1,
+                                               RepTherm = Q5_2,
+                                               TrustDem = Q12_2,
+                                               TrustRep = Q12_3)
+
+
+glimpse(subsetmodeldata)
+```
+
+### Eliminating Unusable Observations (Including Feeling Thermometers)
+
+```{r}
+subsetmodeldata <- subset(subsetmodeldata, as.character(Dem_Treatment) != "-99" | as.character(GOP_Treatment) != "-99" | as.character(Control) != "-99")
+
+subsetmodeldata <- subset(subsetmodeldata, !(gender == "" & ethnicity == "")) 
+
+
+subsetmodeldata <- subset(subsetmodeldata, !(ethnicity == 16 | hhi == 25 | pid3lean == "" | education == -3105 | hispanic == 15 | DemTherm == -99 | RepTherm == -99 | TrustDem == -99 | TrustRep == -99 ))
+```
+
+## Re-coding where necessary :p
+
+```{r}
+#Recode hispanic variable
+subsetmodeldata$hispanrecode <- ifelse(subsetmodeldata$hispanic == 1, 0,
+                                   ifelse(subsetmodeldata$hispanic >= 2 & 
+                                            subsetmodeldata$hispanic <= 16, 1, 
+                                          subsetmodeldata$hispanic))
+
+subsetmodeldata <- subsetmodeldata %>% mutate(hispanrecode, "Hispanic" = case_when(
+  hispanrecode == 0 ~ "Non-Hispanic", 
+  hispanrecode == 1 ~ "Hispanic"
+))
+  
+subsetmodeldata$Hispanic <- factor(subsetmodeldata$Hispanic, levels = c("Non-Hispanic", "Hispanic"))
+
+#Recode ethnicity variable
+subsetmodeldata$ethnicrecode <- ifelse(subsetmodeldata$ethnicity >= 4 & 
+                                         subsetmodeldata$ethnicity <= 10, 4,
+                                       ifelse(subsetmodeldata$ethnicity >= 11 & 
+                                                subsetmodeldata$ethnicity <= 14, 5,
+                                              ifelse(subsetmodeldata$ethnicity == 15
+                                                     , 6, subsetmodeldata$ethnicity
+                                                     )))
+
+subsetmodeldata <- subsetmodeldata %>% mutate(ethnicrecode, "Ethnicity" = case_when(
+  ethnicrecode == 1 ~ "White",
+  ethnicrecode == 2 ~ "African American", 
+  ethnicrecode == 3 ~ "American Indian/Alaskan Native", 
+  ethnicrecode == 4 ~ "Asian",
+  ethnicrecode == 5 ~ "Pacific Islander",
+  ethnicrecode == 6 ~ "Other"
+))
+
+
+subsetmodeldata$Ethnicity <- factor(subsetmodeldata$Ethnicity, levels = c("White", "African American", "American Indian/Alaskan Native", "Asian", "Pacific Islander", "Other"))
+
+#create dummy variables indicating which treatment was received
+subsetmodeldata$control_dummy <- ifelse(subsetmodeldata$Control %in% c(1, 2), 1, 0)
+subsetmodeldata$Dem_dummy <- ifelse(subsetmodeldata$Dem_Treatment %in% c(1, 2), 1, 0)
+subsetmodeldata$Dem_dummy <- as.factor(subsetmodeldata$Dem_dummy)
+
+subsetmodeldata$GOP_dummy <- ifelse(subsetmodeldata$GOP_Treatment %in% c(1, 2), 1, 0)
+subsetmodeldata$GOP_dummy <- as.factor(subsetmodeldata$GOP_dummy)
+
+
+subsetmodeldata <- subsetmodeldata %>% mutate(hhi, HouseholdIncome = case_when(
+  hhi == 1 ~ "Less than $14,999",
+  hhi == 2 ~ "$15,000-$19,999",
+  hhi == 3 ~ "$20,000-$24,999",
+  hhi == 4 ~ "$25,000-$29,999",
+  hhi == 5 ~ "$30,000-$34,999",
+  hhi == 6 ~ "$35,000-$39,999",
+  hhi == 7 ~ "$40,000-$44,999",
+  hhi == 8 ~ "$45,000-$44,999",
+  hhi == 9 ~ "$50,000-$54,999",
+  hhi == 10 ~ "$55,000-$59,999",
+  hhi == 11 ~ "$60,000-$64,999",
+  hhi == 12 ~ "$65,000-$69,999",
+  hhi == 13 ~ "$70,000-$74,999",
+  hhi == 14 ~ "$75,000-$79,999",
+  hhi == 15 ~ "$80,000-$84,999",
+  hhi == 16 ~ "$85,000-$89,999",
+  hhi == 17 ~ "$90,000-$94,999",
+  hhi == 18 ~ "$95,000-$99,999",
+  hhi == 19 ~ "$100,000-$124,999",
+  hhi == 20 ~ "$125,000-$149,999",
+  hhi == 21 ~ "$150,000-$174,999",
+  hhi == 22 ~ "$175,000-$199,999",
+  hhi == 23 ~ "$200,000-$249,999",
+  hhi == 24 ~ "$250,000 and Above",
+  hhi == 25 ~ "Prefer Not TO Answer"
+))
+
+
+subsetmodeldata <- subsetmodeldata %>% mutate(education, Education = case_when(
+  education == 1 ~ "Some High School or Less",
+  education == 2 ~ "High School (HS) Graduate",
+  education == 3 ~ "Post HS Vocational School",
+  education == 4 ~ "Some College, No Degree",
+  education == 5 ~ "Associate's Degree",
+  education == 6 ~ "Bachelor's Degree",
+  education == 7 ~ "Master's or Professional Degree", 
+  education == 8 ~ "Doctorate Degree"
+))
+
+subsetmodeldata$Education <- factor(subsetmodeldata$Education, levels = c("Some High School or Less", "High School (HS) Graduate", "Post HS Vocational School", "Some College, No Degree", "Associate's Degree", "Bachelor's Degree", "Master's or Professional Degree", "Doctorate Degree"))
+
+```
+
+
+
+## Creating The Model and Further Transformations
+
+```{r}
+
+subsetmodeldataLONG <- pivot_longer(subsetmodeldata, cols = c(Control, Dem_Treatment, GOP_Treatment),
+                         names_to = "Treatment", values_to = "Supporting Appointment")
+
+subsetmodeldataLONG$`Supporting Appointment` <- factor(subsetmodeldataLONG$`Supporting Appointment`, levels = c(1, 2, NA), labels = c("Yes", "No"))
+
+subsetmodeldataLONG$`Supporting Appointment` <- ifelse(subsetmodeldataLONG$`Supporting Appointment` == "Yes", 1,
+                                          ifelse(subsetmodeldataLONG$`Supporting Appointment` == "No", 0, NA))
+
+subsetmodeldataLONG <- subsetmodeldataLONG %>% mutate(`Support Appointment` = factor(`Supporting Appointment`, 
+                                                                      levels = c(0, 1),
+                                                                      labels = c("No", "Yes")))
+
+subsetmodeldataLONG <- subset(subsetmodeldataLONG, !is.na(`Supporting Appointment`))
+
+subsetmodeldataLONG$pid3lean <- factor(subsetmodeldataLONG$pid3lean, levels = c("Independent", "Democrat", "Republican"))
+
+#Variable for in-group/out-group
+
+subsetmodeldataLONG$inandout <-ifelse(subsetmodeldataLONG$pid3lean == "Independent", NA,
+                                ifelse(subsetmodeldataLONG$Treatment == "Dem_Treatment" & subsetmodeldataLONG$pid3lean == "Democrat", "In-Party",
+                                ifelse(subsetmodeldataLONG$Treatment == "GOP_Treatment" & subsetmodeldataLONG$pid3lean == "Republican", "In-Party",
+                                ifelse(subsetmodeldataLONG$Treatment == "Control", "Neither",
+                                       "Out-Party"))))
+
+
+
+subsetmodeldataLONG$inandout <- factor(subsetmodeldataLONG$inandout, levels = c("Neither", "In-Party", "Out-Party"))
+
+subsetmodeldataLONG$gender <- factor(subsetmodeldataLONG$gender,
+                                     levels = c(1,2),
+                                     labels = c("male", "female"))
+
+subsetmodeldataLONG <- subsetmodeldataLONG %>% drop_na(inandout)
+```
+
+
+## Renaming Variables
+```{r}
+
+subsetmodeldataLONG <- subsetmodeldataLONG %>% select(Treatment, `Supporting Appointment`, pid3lean, age, inandout, Hispanic, Ethnicity, Education, HouseholdIncome, gender, DemTherm, RepTherm, TrustDem, TrustRep, Dem_dummy, GOP_dummy, control_dummy) %>% rename(Party = pid3lean, Group = inandout, Age = age, Gender = gender)
+
+```
+
+
+## Let's Summarise/Visualize!
+
+```{r}
+# kable(subsetmodeldataLONG)
+
+sumfun <- dfSummary(subsetmodeldataLONG, varnumbers = FALSE,
+          valid.col    = FALSE)
+
+# 
+# frequencyFordata <- freq(subsetmodeldataLONG)
+# stview(frequencyFordata)
+
+```
+
+```{r}
+
+hist(subsetmodeldataLONG$Age)
+hist(subsetmodeldataLONG$DemTherm)
+hist(subsetmodeldataLONG$RepTherm)
+hist(subsetmodeldataLONG$TrustDem)
+hist(subsetmodeldataLONG$TrustRep)
+ggplot(subsetmodeldataLONG, aes(x = Treatment)) +
+  geom_bar()
+
+ggplot(subsetmodeldataLONG, aes(x = Hispanic)) +
+  geom_bar()
+
+ggplot(subsetmodeldataLONG, aes(x = HouseholdIncome)) +
+  geom_bar()
+
+ggplot(subsetmodeldataLONG, aes(x = Education)) +
+  geom_bar()
+
+ggplot(subsetmodeldataLONG, aes(x = Party)) +
+  geom_bar()
+
+ggplot(subsetmodeldataLONG, aes(x = Ethnicity)) +
+  geom_bar()
+```
+
+## Checking for Separation:
+
+```{r}
+
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$GOP_dummy)    
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Dem_dummy)
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Gender)
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Party)
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Group)
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Ethnicity) #combine or 
+#exclude Islander and Native American due to lack of occurences for Yes/no
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Hispanic)
+table(subsetmodeldataLONG$`Supporting Appointment`, subsetmodeldataLONG$Education)
+```
+
+## Models - Testing for Explanatory Power W/ Diff IV Combos
+
+```{r}
+
+partyonly <- glm(`Supporting Appointment` ~  Party + Group,
+             data = subsetmodeldataLONG, family = "binomial")
+summary(partyonly)
+
+
+#simplest regression with party and in/outgroup status - I refer to this combo as 
+#party because both variables are dependent on a respondents party affiliation
+
+  # testingdata <- subsetmodeldataLONG
+  
+```
+
+```{r}
+
+
+partysocial <- glm(`Supporting Appointment` ~  Party + Group + Gender, 
+             data = subsetmodeldataLONG, family = "binomial")
+
+summary(partysocial)
+
+#Best Model? AIC decreases significantly and we see signficance in added
+#variable gender. Adding hhi drastically increaases AIC.
+#although there is signficance found between certain income levels
+#adding education increases AIC with no further significance. 
+```
+
+```{r}
+### Checking Fit? 
+
+Anova(partysocial, type = "II", test.statistic = "F", error.estimate = "deviance")
+
+
+```
+
+
+
+
+```{r}
+
+partysocial_edu <- model3 <-  glm(`Supporting Appointment` ~  Party + Group + Gender + Age + Education, 
+             data = subsetmodeldataLONG, family = "binomial")
+summary(partysocial_ethedu)
+
+ #partysocial model + ethnicity and education  
+```
+
+
+
+```{r}
+
+partysocial_feelings <-  glm(`Supporting Appointment` ~  Party + Group + Gender + DemTherm + RepTherm, 
+             data = subsetmodeldataLONG, family = "binomial")
+
+summary(partysocial_feelings)
+
+```
+
+```{r}
+
+partysocial_trust <-  glm(`Supporting Appointment` ~  Party + Group + Gender + TrustDem + TrustRep, 
+             data = subsetmodeldataLONG, family = "binomial")
+
+summary(partysocial_trust)
+
+#we do not increase AIC score by adding trust variables, although neither are
+#significant and there seems to be a multicolinearity issue arising between them
+#and our variable accounting for party, leading to less reliable effect estimate
+#This concern is offset by the fact that removing these variables does not change
+#coefficients of significant variables drastically. 
+#Interestingly, we lose signficance on party variables when adding Trust, 
+#indicating that when trust for both parties is held equal, one's party is not a #significant predictor of their answer to our experiment. 
+```
+
+```{r}
+
+model_allpredictors <- glm(`Supporting Appointment` ~  Party + Group + Gender + TrustDem + TrustRep + DemTherm + RepTherm  + Education + Ethnicity + Hispanic, 
+             data = subsetmodeldataLONG, family = "binomial")
+
+
+summary(model_allpredictors)
+
+#No bueno here. Severe multicolinearity and AIC penalty.
+```
+
+## Visualize Results:
+
+```{r}
+
+ plot_model(partyonly, show.values = TRUE, value.offset = .3, vline.color = "red", title = "Simplest Model")
+
+
+ plot_model(partysocial, show.values = TRUE, value.offset = .3, vline.color = "red", title = "Best Fit Model")
+
+
+plot_model(partysocial_trust, show.values = TRUE, axis.labels = "", value.offset = .3, vline.color = "red", title = "Trust Model")
+
+
+plot_model(partysocial_feelings, show.values = TRUE, axis.labels = "", value.offset = .3, vline.color = "red", title = "Feelings Model")
+#Use transform = "plogis" to convert to probabilities. 
+
+```
+
+## Final Coefficient Plot for Partysocial model; Predicted Prob Plot
+
+```{r}
+### Run this separately from above modeling. I had to re-order the factors for plotting.
+
+# custom_colors <- c("Democrat" = "blue", "Republican" = "red", "Independent" = "purple")
+
+custom_colors <- c("Democrat" = "blue", "Republican" = "red")
+
+# subsetmodeldataLONG$Party <- factor(subsetmodeldataLONG$Party, levels = c("Democrat", "Independent", "Republican"))
+
+subsetmodeldataLONG <- subsetmodeldataLONG %>% mutate(Group = case_when(
+  Group == "Out-Party" ~ "Out-Group",
+  Group == "In-Party" ~ "In-Group",
+  Group == "Neither" ~ "Neither"
+))
+
+subsetmodeldataLONG$Group <- factor(subsetmodeldataLONG$Group, levels = c("Neither", "Out-Group", "In-Group"))
+
+partysocial <- glm(`Supporting Appointment` ~  Party + Group + Age + Gender, 
+             data = subsetmodeldataLONG, family = "binomial")
+
+p1 <- plot_model(partysocial, type = "eff", terms = "Party") +
+  theme_minimal()
+
+ 
+p2 <- plot_model(partysocial, type = "eff", terms = c("Group", "Party")) +
+  scale_color_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Probability of Appointment Support", y = "Probability (%)")
+
+# Remove 'Independent' rows for 'In-Party' or 'Out-Party'
+## my dumbass spent way too long photoshopping when
+## sjplots() actually provides a data object when plotting.
+## I just filtered the data object to exclude inependents where
+## it makes sense. 
+
+
+p2$data <- p2$data %>% filter(!(group == "Independent" & x %in% c(1, 3))
+)
+
+
+p1
+
+### Final predicted prob plot.
+p2
+
+ggsave(
+    filename = "party_groupME.jpeg",
+    plot = p2, 
+    device = "jpeg",
+    dpi = 300,
+    scale = 1.5,
+    height = 3,
+    width = 4.5,
+    units = "in"
+)
+
+
+# FINAL Coefficient Plot 
+
+
+p3 <- plot_model(partysocial, show.values = "TRUE", vline.color = "red", 
+                 title = "Coefficient Plot (In Percentages)", transform = "plogis",
+                 return.data = TRUE,
+                 axis.labels = c("Female", "In-Group",
+                                 "Out-Group", "Republican")) + 
+  geom_hline(yintercept = .5)
+
+p3
+
+ggsave(
+    filename = "coefficientplotsJA.jpeg",
+    plot = p3, 
+    device = "jpeg",
+    dpi = 300,
+    scale = 1.5,
+    height = 3,
+    width = 4.5,
+    units = "in"
+)
+
+```
+
+
+
+```{r}
+plot_model(partysocial_trust, type = "pred", terms = c("Group", "Party"))
+
+plot_model(partysocial_trust, type = "pred", terms = "Group")
+
+plot_model(partysocial_trust, type = "pred", terms = "Party")
+
+plot_model(partysocial_trust, type = "pred", terms = c("TrustDem", "Party"))
+```
+
+
+```{r}
+plot_model(partyonly, type = "pred", terms = "Group")
+
+plot_model(partyonly, type = "pred", terms = "Party")
+
+plot_model(partyonly, type = "pred", terms = c("Group", "Party"))
+```
+
+
+```{r}
+
+
+stargazer(partyonly, partysocial, partysocial_trust, partysocial_feelings, title="Results", dep.var.labels = "Propensity to Answer Yes",no.space = TRUE, column.sep.width = "5pt", type = "latex", out = "JAmodels.txt", vcov = vcovHC,    
+          vcov.args  = list(type = "HC1"),
+          single.row = TRUE)
+
+
+
+stargazer(partyonly, partysocial, partysocial_trust, partysocial_feelings, title="Results",
+          align=TRUE, 
+          column.labels=c("Party Only", "Party Social", 
+                           "Party Social Trust", "Party Social Feelings"),
+          keep.stat = c("bic", "aic"),
+          no.space=TRUE, style = "apsr", type = "text")
+
+```
+
+## Diagnostics for Logit Regression:
+
+```{r}
+#Multicolinearity Check
+vifcheck <- vif(partyonly)
+vifcheck
+# 
+# vifcheck2 <- vif(partysocial)
+# vifcheck2
+# 
+# vifcheck3 <- vif(partysocialethn)
+# vifcheck3
+# 
+# vifcheck4 <- vif(partysocialedu)
+# vifcheck4
+# 
+# vifcheck5 <- vif(partysocial_feelings)
+# vifcheck5
+# 
+# vifcheck6 <- vif(partysocial_incomeedu)
+# vifcheck6
+# 
+# vifcheck7 <- vif(partysocial_trust)
+# vifcheck7
+```
+
+Durbin-Watson Tests:
+
+```{r}
+#WE GOOOOOOOOD
+dwt(partysocial)
+
+dwt(partyonly)
+
+dwt(partysocial_trust)
+```
+
+```{r}
+#Linearity between DV and continious IV - I think we good to use any of these
+
+car::crPlots(partysocial, terms = ~ age,
+             pch=20, col="gray",
+             smooth = list(smoother=car::gamLine))
+
+car::crPlots(partysocial_feelings, terms = ~ DemTherm,
+             pch=20, col="gray",
+             smooth = list(smoother=car::gamLine))
+
+car::crPlots(partysocial_feelings, terms = ~ RepTherm,
+             pch=20, col="gray",
+             smooth = list(smoother=car::gamLine))
+
+car::crPlots(partysocial_trust, terms = ~ TrustDem,
+             pch=20, col="gray",
+             smooth = list(smoother=car::gamLine))
+
+car::crPlots(partysocial_trust, terms = ~ TrustRep,
+             pch=20, col="gray",
+             smooth = list(smoother=car::gamLine))
+
+
+
+
+```
+
+```{r}
+#Goodness of Fit test for two best  models 
+
+hltest(partysocial, verbose = TRUE)
+
+hltest(partysocial_trust, verbose = TRUE)
+
+hltest(partysocialethn, verbose = TRUE)
+
+hltest(partysocialedu, verbose = TRUE)
+
+hltest(partysocial_ethedu, verbose = TRUE)
+
+
+
+```
+
+```{r}
+plot(partyonly)
+
+plot(partysocial)
+
+
+plot(partysocial_trust)
+
+```
+
+## Marginal Effects for Partysocial Model 
+
+```{r}
+library(margins)
+
+probabilities <- plogis(coef(partysocial))
+probabilities
+
+marg_eff <- margins(partysocial, data = model.frame(partysocial))
+
+marg_table <- summary(marg_eff)
+
+marg_table$AME <- marg_table$AME*100
+
+marg_table <- marg_table %>% 
+  select(factor, AME, SE, p)
+
+stargazer(marg_table, summary = FALSE, 
+          align = TRUE,
+          no.space = TRUE,
+          style = "apsr")
+
+```
+
